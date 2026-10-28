@@ -212,6 +212,7 @@ font-size:12px;margin-top:30px
 <a href="#games">Games</a>
 <a href="#packages">Packages</a>
 <button class="btn" type="button" onclick="openCustomer()">My Account</button>
+<button class="btn" type="button" onclick="openTracking()">Track Order</button>
 <button class="btn primary" type="button" onclick="openOrder()">Order Now ↗</button>
 </div>
 </nav>
@@ -265,6 +266,22 @@ font-size:12px;margin-top:30px
 <div class="step"><h3>01 · Choose packages</h3><p class="muted">Add up to 10 different package lines in one order.</p></div>
 <div class="step"><h3>02 · Enter your details</h3><p class="muted">Log in and enter your Player UID and contact number.</p></div>
 <div class="step"><h3>03 · Send your order</h3><p class="muted">Save the order and send all package details through WhatsApp.</p></div>
+</div>
+</section>
+
+<section class="content wrap" id="trackingSection">
+<div class="section-head">
+<div class="tag">ORDER STATUS</div>
+<h2>Track Order</h2>
+<p class="muted">Enter your Order ID to check the latest status. For privacy, log in to the customer account that placed the order first.</p>
+</div>
+<div class="card">
+<form id="trackingForm">
+<div class="field"><label for="trackingOrderId">Order ID</label><input id="trackingOrderId" autocomplete="off" maxlength="150" placeholder="Paste your Order ID here" required></div>
+<button class="btn primary" type="submit" id="trackOrderButton">Track Order</button>
+</form>
+<div id="trackingNotice" class="notice" role="status" aria-live="polite"></div>
+<div id="trackingResult" class="order-list" aria-live="polite"></div>
 </div>
 </section>
 
@@ -624,6 +641,11 @@ window.openCustomer=()=>{
  $("customerSection").scrollIntoView({behavior:"smooth"});
 };
 
+window.openTracking=()=>{
+ $("trackingSection").scrollIntoView({behavior:"smooth"});
+ $("trackingOrderId").focus({preventScroll:true});
+};
+
 window.openAdmin=()=>{
  hideNotice("adminNotice");
  $("adminModal").classList.add("open");
@@ -902,6 +924,59 @@ async function loadCustomerOrders(user){
   $("currentOrders").innerHTML='<p class="muted">Could not load orders. Check Firestore rules and database indexes.</p>';
  }
 }
+
+/* CUSTOMER ORDER TRACKING: only the signed-in order owner may view an order */
+$("trackingForm").addEventListener("submit", async event=>{
+ event.preventDefault();
+ const user=auth?.currentUser;
+ const orderId=$("trackingOrderId").value.trim();
+ const resultEl=$("trackingResult");
+ resultEl.innerHTML="";
+ hideNotice("trackingNotice");
+
+ if(!user){
+  notice("trackingNotice","Please log in to the customer account used to place this order.");
+  $("customerSection").scrollIntoView({behavior:"smooth"});
+  return;
+ }
+ if(user.uid===ADMIN_UID){
+  notice("trackingNotice","Use the Admin dashboard to manage and view all orders.");
+  return;
+ }
+ if(!db||!orderId){
+  notice("trackingNotice","Enter a valid Order ID and try again.");
+  return;
+ }
+
+ const button=$("trackOrderButton");
+ button.disabled=true;
+ button.textContent="Checking order…";
+ try{
+  const orderSnap=await getDoc(doc(db,"orders",orderId));
+  if(!orderSnap.exists()||orderSnap.data().userId!==user.uid){
+   notice("trackingNotice","Order not found for this customer account. Check the Order ID and make sure you are logged in with the account used to place the order.");
+   return;
+  }
+  const order=orderSnap.data();
+  const status=order.status==="completed"?"completed":"pending";
+  const items=order.items?.length?order.items:[{gameName:order.gameName,packageName:order.packageName,quantity:1}];
+  resultEl.innerHTML=`
+   <article class="order-row">
+    <strong>Order Status</strong>
+    <p>Order ID: ${esc(orderSnap.id)}</p>
+    <p>Packages: ${itemSummary(items)}</p>
+    <p>Player UID: ${esc(order.playerUID||"")}</p>
+    <p>Status: <span class="status ${status}">${status}</span></p>
+   </article>`;
+  notice("trackingNotice","Order found. This is the latest status saved by SILENT GAMING.",true);
+ }catch(error){
+  console.error("Order tracking error:",error);
+  notice("trackingNotice","Could not check this order. Please check your connection and Firestore Security Rules.");
+ }finally{
+  button.disabled=false;
+  button.textContent="Track Order";
+ }
+});
 
 /* SAVE ALL SELECTED PACKAGES AS ONE ORDER */
 $("orderForm").addEventListener("submit",async event=>{
